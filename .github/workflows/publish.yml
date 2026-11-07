@@ -21,6 +21,9 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      - name: Install dependencies
+        # `esbuild` (devDependency) is what `prepublishOnly` bundles with.
+        run: npm install --no-fund --no-audit
       - name: Build and publish
         # The public API origin is baked into the bundle at build time; the release
         # build refuses to run without a https URL.
