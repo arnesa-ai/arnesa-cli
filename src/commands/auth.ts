@@ -166,9 +166,87 @@ export async function runLogin(args: readonly string[], ctx: Ctx): Promise<numbe
   }
 }
 
+/** Why logout left the credential where it did: the closed set of the logout spec. */
+export const LOGOUT_REASONS = [
+  'revoked',
+  'already_revoked',
+  'server_error',
+  'network',
+  'key_not_revocable',
+  'nothing_stored',
+] as const;
+export type LogoutReason = (typeof LOGOUT_REASONS)[number];
+
+const REVOKE_TIMEOUT_MS = 5_000;
+
+/**
+ * Classifies a failed revoke call for the device-token branch. A 401 whose error carries
+ * `details.reason: 'CREDENTIAL_REVOKED'` means someone (usually the person at /me) already
+ * revoked this device; every other HTTP answer is a server problem, and a timeout or a
+ * network failure is `network`. The call is made once and never retried.
+ */
+function logoutReasonOf(
+  error: ApiError,
+): Exclude<LogoutReason, 'revoked' | 'key_not_revocable' | 'nothing_stored'> {
+  if (error.code === 'NETWORK' || error.code === 'TIMEOUT') return 'network';
+  const details = z.object({ reason: z.string().optional() }).safeParse(error.details);
+  if (
+    error.code === 'UNAUTHENTICATED' &&
+    details.success &&
+    details.data.reason === 'CREDENTIAL_REVOKED'
+  ) {
+    return 'already_revoked';
+  }
+  return 'server_error';
+}
+
+/**
+ * `arnesa logout`: revokes the stored credential on the server and then always removes the
+ * keychain entry — even when the server fails or is unreachable, so a network failure cannot
+ * leave the person signed in locally. An `ak_` key cannot revoke itself: only the local entry
+ * goes, and the key stays valid until it is revoked at /me. `ARNESA_API_KEY` is never read or
+ * changed; it is only mentioned in the message when it is set (the environment key is not ours
+ * to clear). Exit 0 on every branch.
+ */
 export async function runLogout(_args: readonly string[], ctx: Ctx): Promise<number> {
-  (await ctx.keychain()).delete();
-  ctx.emit({ loggedOut: true }, [messages.loggedOut]);
+  const keychain = await ctx.keychain();
+  const stored = keychain.available ? keychain.get() : null;
+  if (!stored) {
+    // Previous behaviour: a local no-op that exits 0, now saying clearly nothing is stored.
+    keychain.delete();
+    ctx.emit({ loggedOut: true, revoked: false, reason: 'nothing_stored' satisfies LogoutReason }, [
+      messages.logoutNothingStored,
+    ]);
+    return EXIT.ok;
+  }
+
+  const lines: string[] = [];
+  let revoked = false;
+  let reason: LogoutReason;
+  if (stored.startsWith('ad_')) {
+    try {
+      await ctx.client().request('POST', '/api/v1/device/revoke', {
+        token: stored,
+        timeoutMs: REVOKE_TIMEOUT_MS,
+        schema: z.null(),
+      });
+      revoked = true;
+      reason = 'revoked';
+      lines.push(messages.logoutRevoked);
+    } catch (error) {
+      reason = error instanceof ApiError ? logoutReasonOf(error) : 'server_error';
+      lines.push(
+        reason === 'already_revoked' ? messages.logoutAlreadyRevoked : messages.logoutRevokeFailed,
+      );
+    }
+  } else {
+    // An `ak_` key opens no device management (AC-46.3): no revoke call is made.
+    reason = 'key_not_revocable';
+    lines.push(messages.logoutKeyOnly);
+  }
+  keychain.delete();
+  if (ctx.io.env.ARNESA_API_KEY?.trim()) lines.push(messages.logoutEnvKeyUntouched);
+  ctx.emit({ loggedOut: true, revoked, reason }, lines);
   return EXIT.ok;
 }
 

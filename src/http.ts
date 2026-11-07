@@ -108,7 +108,9 @@ export function createHttpClient(options: HttpOptions) {
       );
       try {
         const headers: Record<string, string> = { accept: 'application/json', origin };
-        if (o.body !== undefined) headers['content-type'] = 'application/json';
+        // Mutating routes refuse any POST without an application/json media type, so bodiless
+        // POSTs (logout's revoke) must still carry the header.
+        if (method !== 'GET') headers['content-type'] = 'application/json';
         if (o.token) headers.authorization = `Bearer ${o.token}`;
         let res: Response;
         try {
@@ -170,7 +172,12 @@ export function createHttpClient(options: HttpOptions) {
           throw new ApiError(message, exitForApiError(code, res.status), code, details ?? null);
         }
 
-        const ok = OkEnvelope.safeParse(json);
+        // A 204 carries no body (the device self-revoke): success with no payload, validated by
+        // the caller's schema. Anything else must speak the shared `{success, data}` envelope.
+        const ok =
+          res.status === 204
+            ? { success: true as const, data: { data: null } }
+            : OkEnvelope.safeParse(json);
         const data = ok.success ? o.schema.safeParse(ok.data.data) : null;
         if (!data?.success) throw new ApiError(messages.badResponse, EXIT.failure, 'BAD_RESPONSE');
         return data.data;

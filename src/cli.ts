@@ -9,7 +9,7 @@ import { EXIT } from './exit';
 import { ApiError, createHttpClient, type HttpClient } from './http';
 import { runConfig, runLogin, runLogout } from './commands/auth';
 import type { Keychain } from './keychain';
-import { messages } from './messages';
+import { commandHelp, messages } from './messages';
 
 /** The default API origin, injected at build time from `ARNESA_PUBLIC_API_URL` (D55: no domain in source). */
 declare const __ARNESA_API_URL__: string | undefined;
@@ -29,6 +29,9 @@ const COMMANDS: Record<string, Command> = {
   logout: runLogout,
   config: runConfig,
 };
+
+/** The command names, exported for the tests that pin the coverage of the per-command help. */
+export const COMMAND_NAMES = Object.keys(COMMANDS);
 
 const OPTIONS = {
   json: { type: 'boolean' },
@@ -79,9 +82,15 @@ export async function main(argv: readonly string[], terminal: CliIo): Promise<nu
     return EXIT.ok;
   }
   const name = positionals[0];
-  if (values.help || !name) {
-    for (const line of messages.usage) (values.help ? io.out : io.err)(line);
-    if (values.help) return EXIT.ok;
+  if (values.help) {
+    // An unknown command with --help stays a usage error; a known one gets its own help
+    // and never runs (so `arnesa logout --help` cannot touch the keychain).
+    if (name && !COMMANDS[name]) return fail(messages.unknownCommand(name), EXIT.usage, 'USAGE');
+    for (const line of (name ? commandHelp[name] : undefined) ?? messages.usage) io.out(line);
+    return EXIT.ok;
+  }
+  if (!name) {
+    for (const line of messages.usage) io.err(line);
     return fail(messages.noCommand, EXIT.usage, 'USAGE');
   }
   const command = COMMANDS[name];

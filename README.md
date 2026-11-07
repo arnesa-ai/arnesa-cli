@@ -39,7 +39,7 @@ Add `--json` for one JSON document on stdout.
 
 ## Limits
 
-Working defaults, effective 2026-11-06. They can change, and the server answers with exit code 5 when one is reached.
+Working defaults, effective 2026-11-06, confirmed by the founder on 2026-11-07 (Open Question 1, design decision 6 of `add-arnesa-local-cli`). They can change, and the server answers with exit code 5 when one is reached.
 
 | Caller                            | `recommend`       | `compile` (install) |
 | --------------------------------- | ----------------- | ------------------- |
