@@ -1,0 +1,39 @@
+{
+  "name": "arnesa",
+  "version": "0.1.0",
+  "description": "Find, install and check coding-agent harnesses from your terminal.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "arnesa": "./dist/arnesa.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arnesa-ai/arnesa-cli.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepublishOnly": "node scripts/build.mjs --release"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "2.1.2"
+  }
+}
