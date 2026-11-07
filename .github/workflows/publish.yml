@@ -1,0 +1,30 @@
+name: publish
+
+# Publishes `arnesa` to npm with provenance. Provenance is the npm attestation that
+# ties the published tarball to this repository and workflow run, so a user can
+# verify where a build came from. A release must be published on GitHub to trigger it.
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write # required for provenance
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Build and publish
+        # The public API origin is baked into the bundle at build time; the release
+        # build refuses to run without a https URL.
+        env:
+          ARNESA_PUBLIC_API_URL: https://arnesa.id.vn
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
