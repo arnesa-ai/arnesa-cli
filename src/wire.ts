@@ -87,6 +87,18 @@ export const CompileResponseSchema = z.object({
 export type CompileResponse = z.infer<typeof CompileResponseSchema>;
 
 // ── recommend ──────────────────────────────────────────────────────────────────────────────────
+export const ProfileSchema = z.strictObject({
+  version: z.literal(1),
+  languages: z.array(z.string()).max(8),
+  frameworks: z.array(z.string()).max(60),
+  packageManagers: z.array(z.string()).max(14),
+  testCommand: z.string(),
+  agentConfig: z.record(z.string(), z.number().int().min(0)),
+  runtime: z.string(),
+  model: z.string().nullable(),
+});
+export type Profile = z.infer<typeof ProfileSchema>;
+
 /** The request body is built by `profileRequest` (profile + profileHash + cliVersion); it is a JSON string. */
 export const RecommendResponseSchema = z.object({
   results: z.array(
@@ -184,6 +196,24 @@ export const DoctorStartResponseSchema = z.object({
   status: z.string(),
   reportUrl: z.string().url(),
 });
+/** One finding group: rule, highest severity, how many, in which files. Never an excerpt. */
+export const DoctorFindingGroupSchema = z.object({
+  ruleId: z.string().min(1),
+  severity: z.enum(['critical', 'warning', 'info']),
+  count: z.number().int().nonnegative(),
+  /** Capped at 50 (R1-05); `moreFiles` counts the rest when the cap was hit. */
+  files: z.array(z.string()),
+  moreFiles: z.number().int().nonnegative().optional(),
+});
+/** The scanner's own completeness detail; every string was masked by the scanner. */
+export const DoctorCompletenessSchema = z.object({
+  isComplete: z.boolean(),
+  coveragePercent: z.number().nullable(),
+  fullyInspected: z.number().nullable(),
+  partiallyInspected: z.number().nullable(),
+  uninspected: z.number().nullable(),
+  exceptions: z.array(z.object({ path: z.string(), reasonCode: z.string(), message: z.string() })),
+});
 export const DoctorStatusResponseSchema = z.object({
   id: z.string().min(1),
   status: z.string(),
@@ -191,4 +221,24 @@ export const DoctorStatusResponseSchema = z.object({
   filesScanned: z.number().nullable(),
   counts: z.object({ critical: z.number(), warning: z.number(), info: z.number() }),
   reportUrl: z.string().url(),
+  // Older servers answer without these; the command degrades to today's output.
+  findings: z.array(DoctorFindingGroupSchema).optional(),
+  completeness: DoctorCompletenessSchema.nullable().optional(),
 });
+export type DoctorStatusResponse = z.infer<typeof DoctorStatusResponseSchema>;
+
+// ── rate ──────────────────────────────────────────────────────────────────────────────────────
+export const RatingRequestSchema = z.strictObject({
+  harness: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/),
+  version: z.string().regex(/^[0-9A-Za-z.+-]{1,64}$/),
+  model: z.string().regex(/^[A-Za-z0-9._:/-]{1,64}$/),
+  runtime: z.string().min(1).max(32),
+  outcome: z.enum(['pass', 'fail']),
+});
+export type RatingRequest = z.infer<typeof RatingRequestSchema>;
+
+export const RatingResponseSchema = z.object({
+  recorded: z.boolean(),
+  outcome: z.enum(['pass', 'fail']),
+});
+export type RatingResponse = z.infer<typeof RatingResponseSchema>;

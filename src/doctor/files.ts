@@ -93,13 +93,46 @@ export interface DoctorSelection {
   skipped: Array<{ path: string; reason: string }>;
 }
 
+/**
+ * Normalises the optional path argument of `arnesa doctor <directory>` with the
+ * same segment rules `isDoctorFile` enforces (no absolute path, no backslash, no
+ * NUL, no drive letter, no `.`/`..`/`.git` segment). Null when unusable.
+ */
+export function normalizeDoctorSubPath(raw: string): string | null {
+  const p = raw.replace(/\\/g, '/');
+  if (p.length === 0 || p.length > 240) return null;
+  if (p.startsWith('/') || p.includes('\0') || /^[A-Za-z]:/.test(p)) return null;
+  const segments = p.split('/');
+  if (segments.some((s) => s === '' || s === '.' || s === '..' || s.toLowerCase() === '.git')) {
+    return null;
+  }
+  return p;
+}
+
+/** Matching files per first-level directory, largest first: the over-cap refusal names them. */
+export function countsByFirstDirectory(
+  paths: readonly string[],
+): Array<{ dir: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const p of paths) {
+    const dir = p.includes('/') ? p.split('/')[0]! : '(project root)';
+    counts.set(dir, (counts.get(dir) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([dir, count]) => ({ dir, count }))
+    .sort((a, b) => b.count - a.count || a.dir.localeCompare(b.dir));
+}
+
 /** Reads the matching files as text. A symlink, a large file or non-text content is skipped and said so. */
-export function selectDoctorFiles(root: string): DoctorSelection {
+export function selectDoctorFiles(root: string, subPath?: string): DoctorSelection {
+  const prefix = subPath === undefined ? null : `${subPath}/`;
   const files: DoctorSelection['files'] = [];
   const skipped: DoctorSelection['skipped'] = [];
   let bytes = 0;
   for (const path of listProjectFiles(root)) {
     if (!isDoctorFile(path)) continue;
+    // The optional path argument narrows the selection; the allow-list still applies first.
+    if (prefix !== null && !path.startsWith(prefix)) continue;
     const full = join(root, path);
     const info = lstatSync(full);
     if (!info.isFile()) {

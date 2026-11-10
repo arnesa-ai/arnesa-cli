@@ -201,9 +201,11 @@ function logoutReasonOf(
 }
 
 /**
- * `arnesa logout`: revokes the stored credential on the server and then always removes the
- * keychain entry — even when the server fails or is unreachable, so a network failure cannot
- * leave the person signed in locally. An `ak_` key cannot revoke itself: only the local entry
+ * `arnesa logout`: revokes the stored credential on the server and then removes the keychain
+ * entry — even when the server fails or is unreachable, so a network failure cannot leave the
+ * person signed in locally. The entry is keyed by API origin, so a missing or invalid API URL
+ * (`ARNESA_API_URL`, `--api`) stops earlier with a usage error and deletes nothing. An `ak_` key
+ * cannot revoke itself: only the local entry
  * goes, and the key stays valid until it is revoked at /me. `ARNESA_API_KEY` is never read or
  * changed; it is only mentioned in the message when it is set (the environment key is not ours
  * to clear). Exit 0 on every branch.
@@ -214,9 +216,12 @@ export async function runLogout(_args: readonly string[], ctx: Ctx): Promise<num
   if (!stored) {
     // Previous behaviour: a local no-op that exits 0, now saying clearly nothing is stored.
     keychain.delete();
-    ctx.emit({ loggedOut: true, revoked: false, reason: 'nothing_stored' satisfies LogoutReason }, [
-      messages.logoutNothingStored,
-    ]);
+    const lines: string[] = [messages.logoutNothingStored];
+    if (ctx.io.env.ARNESA_API_KEY?.trim()) lines.push(messages.logoutEnvKeyUntouched);
+    ctx.emit(
+      { loggedOut: true, revoked: false, reason: 'nothing_stored' satisfies LogoutReason },
+      lines,
+    );
     return EXIT.ok;
   }
 

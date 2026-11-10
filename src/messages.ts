@@ -9,6 +9,8 @@ export const messages = {
     '  install <harness>[@version] --runtime <id>   Install a harness into this project',
     '  remove <harness>   Undo one install exactly, using arnesa.lock',
     '  doctor      Scan the agent configuration files of this project (asks before uploading)',
+    '  mcp         Start an MCP server on standard input and output for AI coding agents',
+    '  rate pass|fail [<harness>]   Record a self-rating for a harness (sends only with consent)',
     '  login       Sign in with your browser (stores a token in the OS keychain)',
     '  login --key   Read an API key (ak_) from standard input and store it in the keychain',
     "  logout      Sign out: revoke this device's token on the server and remove the stored credential from this machine's keychain. If the revoke fails, the credential is still removed; revoke a device or key at /me.",
@@ -19,6 +21,7 @@ export const messages = {
     '  --api <url> API base URL (env override: $ARNESA_API_URL)',
     '  --yes       Confirm the files of an install without asking',
     '  --allow <id>   Also confirm one command that starts a process (repeatable)',
+    '  --markdown  Print the doctor handoff for your agent (doctor only; ignored with --json)',
     '  --help      Show this help',
     '  --version   Show the version',
   ],
@@ -29,7 +32,8 @@ export const messages = {
   apiMissing:
     'No API URL is set. Say it with --api <url> or the environment variable ARNESA_API_URL.',
   confirmationRequired: 'Confirmation is required and there is no terminal. Re-run with --yes.',
-  network: (reason: string) => `Could not reach Arnesa: ${reason}`,
+  network: (origin: string, reason: string) =>
+    `Could not reach Arnesa at ${origin}: ${reason}. Check the network, or point the CLI at another server with --api <url> or ARNESA_API_URL.`,
   timeout: 'The request to Arnesa timed out.',
   tooLarge: 'The response from Arnesa is larger than this client accepts.',
   badResponse: 'The response from Arnesa is not in the expected shape.',
@@ -110,6 +114,11 @@ export const messages = {
   doctorNoFiles: 'No agent configuration files were found in this project.',
   doctorTooBig: (count: number, bytes: number) =>
     `Found ${count} files (${bytes} bytes). Doctor takes at most 200 files and 1 MiB.`,
+  doctorTooBigIntro: 'Matching agent configuration files by directory:',
+  doctorTooBigDirLine: (dir: string, count: number) => `  ${dir}: ${count} file(s)`,
+  doctorTooBigHint: 'Run the scan in a subdirectory instead: arnesa doctor <directory>',
+  doctorBadPath: (path: string) =>
+    `"${path}" is not a directory inside this project. Give a directory path, for example: arnesa doctor .github`,
   doctorIntro: (count: number, bytes: number) =>
     `These ${count} files (${bytes} bytes) would be uploaded. They are kept for at most one hour and the report is private:`,
   doctorQuestion: 'Upload these files?',
@@ -117,7 +126,30 @@ export const messages = {
   doctorQueued: (url: string) => `Scan started. Report: ${url}`,
   doctorDone: (status: string, critical: number, warning: number, info: number) =>
     `Scan ${status}: ${critical} critical, ${warning} warning, ${info} info.`,
+  doctorGroups: 'Findings by rule:',
+  doctorGroupLine: (
+    severity: string,
+    ruleId: string,
+    count: number,
+    files: number,
+    first: string,
+  ) => `  ${severity} ${ruleId}: ${count} in ${files} file(s), first ${first}`,
+  doctorScanPartial: (fully: number, partial: number, uninspected: number, total: number) =>
+    `The scan finished reading: ${fully} of ${total} files fully inspected, ${partial} only in part, ${uninspected} not inspected. A part-read file can still hide findings.`,
+  doctorCoverage: (coverage: number) => `Coverage: ${coverage}%.`,
+  doctorPartiallyRead: 'Files read only in part:',
+  doctorPartiallyReadLine: (path: string, code: string) => `  ${path} — ${code}`,
   doctorStillRunning: (url: string) => `The scan is still running. Check the report later: ${url}`,
+  rateUsage: 'Usage: arnesa rate pass|fail [<harness>]',
+  rateNeedsDevice:
+    'Rating is not sent: rating needs a signed-in device and metadata sharing. Run "arnesa login" to sign in.',
+  rateNoHarness:
+    'No harness is installed in this project. Specify a harness: arnesa rate pass|fail <harness>.',
+  rateHarnessNotInstalled: (slug: string) =>
+    `Could not tell which version of ${slug} is installed. Say it with ${slug}@<version>.`,
+  rateModelNeeded:
+    'Could not tell which model was used. Say it with --model <name> or $ARNESA_MODEL.',
+  rateRecorded: (outcome: string, harness: string) => `Rating recorded: ${outcome} for ${harness}.`,
 } as const;
 
 /**
@@ -200,19 +232,51 @@ export const commandHelp: Record<string, readonly string[]> = {
   doctor: [
     'doctor — scan the agent configuration files of this project and show the findings.',
     '',
-    'The files are listed first and uploaded only after a yes; they are deleted within one hour at most and the report is private. Needs a signed-in device ("arnesa login"); an API key does not open Doctor.',
+    'The files are listed first and uploaded only after a yes; they are deleted within one hour at most and the report is private. Needs a signed-in device ("arnesa login"); an API key does not open Doctor. An optional directory argument scans only that directory (useful when a project holds more files than the 200-file cap):',
     '',
-    'Usage: arnesa doctor [--yes] [--json]',
+    'Usage: arnesa doctor [directory] [--yes] [--json] [--markdown]',
     '',
     'Options:',
-    '  --yes    Upload the listed files without asking',
-    '  --json   Print the result as one JSON document',
+    '  --yes           Upload the listed files without asking',
+    '  --json          Print the result as one JSON document (with grouped findings and completeness, no excerpts)',
+    '  --markdown      Print the "Copy for your agent" markdown handoff on standard output (ignored with --json)',
     '',
     'Exit codes:',
     '  0  the scan finished (or no agent configuration files were found)',
     '  1  not signed in as a device, or the scan failed',
+    '  2  wrong usage (the path argument is not a directory inside the project)',
     '  3  confirmation is required and there is no terminal',
     '  5  rate limited',
+  ],
+  mcp: [
+    'mcp — start an MCP server on standard input and output for AI coding agents.',
+    '',
+    'Provides profile_project, recommend_harnesses, install_harness, doctor_scan, and open_on_web tools over stdio.',
+    '',
+    'Usage: arnesa mcp',
+    '',
+    'Exit codes:',
+    '  0  clean exit on standard input end',
+    '  2  refused: working directory is home, drive root, or has no project marker',
+  ],
+  rate: [
+    'rate — record a self-rating (pass or fail) for a harness installed in this project.',
+    '',
+    'Sends the rating only when signed in with a device token and metadata sharing is on; with an API key or when anonymous, nothing is sent. Ratings are stored as anonymous daily counts and never reach the leaderboard or recommendations.',
+    '',
+    'Usage: arnesa rate pass|fail [<harness>] [--model <name>] [--runtime <id>] [--json]',
+    '',
+    'Options:',
+    '  --model <name>   The model you used with this harness (taken from $ARNESA_MODEL when omitted)',
+    '  --runtime <id>   The runtime you used (taken from the install record or detected profile when omitted)',
+    '  --json           Print the result as one JSON document',
+    '',
+    'Exit codes:',
+    '  0  the rating was recorded, or skipped because there is no signed-in device',
+    '  1  the request failed or the rating could not be recorded',
+    '  2  wrong usage, missing model, or no harness is installed in this project',
+    '  4  refused by policy (metadata sharing is off, or the harness is paid or unpublished)',
+    '  5  rate limited (at most 20 ratings a day per device)',
   ],
   login: [
     'login — sign in to Arnesa, or store an API key.',

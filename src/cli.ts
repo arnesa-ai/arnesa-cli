@@ -8,6 +8,8 @@ import { runRemove } from './commands/remove';
 import { EXIT } from './exit';
 import { ApiError, createHttpClient, type HttpClient } from './http';
 import { runConfig, runLogin, runLogout } from './commands/auth';
+import { runRate } from './commands/rate';
+import { runMcp } from './mcp/stdio';
 import type { Keychain } from './keychain';
 import { commandHelp, messages } from './messages';
 
@@ -28,6 +30,8 @@ const COMMANDS: Record<string, Command> = {
   login: runLogin,
   logout: runLogout,
   config: runConfig,
+  mcp: runMcp,
+  rate: runRate,
 };
 
 /** The command names, exported for the tests that pin the coverage of the per-command help. */
@@ -42,6 +46,8 @@ const OPTIONS = {
   runtime: { type: 'string' },
   model: { type: 'string' },
   allow: { type: 'string', multiple: true },
+  // `arnesa doctor --markdown` prints the "Copy for your agent" handoff.
+  markdown: { type: 'boolean' },
   // R1-17 option A: `arnesa login --key` reads the key from standard input.
   key: { type: 'boolean' },
 } as const;
@@ -102,7 +108,7 @@ export async function main(argv: readonly string[], terminal: CliIo): Promise<nu
     io,
     json,
     yes: values.yes === true,
-    options: { runtime: values.runtime, model: values.model },
+    options: { runtime: values.runtime, model: values.model, markdown: values.markdown === true },
     allow: values.allow ?? [],
     args: positionals.slice(1),
     keychain: () => (keychainPromise ??= io.openKeychain(ctx.client().origin)),

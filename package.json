@@ -1,6 +1,7 @@
 {
   "name": "arnesa",
-  "version": "0.1.1",
+  "version": "0.2.0",
+  "mcpName": "io.github.arnesa-ai/arnesa",
   "description": "Find, install and check coding-agent harnesses from your terminal.",
   "license": "MIT",
   "type": "module",
@@ -28,9 +29,10 @@
     "prepublishOnly": "node scripts/build.mjs --release"
   },
   "dependencies": {
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "esbuild": "0.28.2"
   },
   "optionalDependencies": {

@@ -32,6 +32,8 @@ export interface RequestOptions<T> {
   token?: string | null;
   /** The RFC 8628 token endpoint answers outside the `{success, data}` envelope. */
   raw?: boolean;
+  /** The answer is plain text (the doctor markdown handoff), not the JSON envelope. */
+  text?: boolean;
   /** Overrides the client's timeout for this request (a compile can fetch from GitHub). */
   timeoutMs?: number;
   schema: z.ZodType<T>;
@@ -125,8 +127,12 @@ export function createHttpClient(options: HttpOptions) {
           if (controller.signal.aborted) {
             throw new ApiError(messages.timeout, EXIT.failure, 'TIMEOUT');
           }
-          const reason = error instanceof Error ? error.message : 'unknown error';
-          throw new ApiError(messages.network(reason), EXIT.failure, 'NETWORK');
+          // Node's fetch hides the useful part (ENOTFOUND, ECONNREFUSED) in `cause`.
+          const code = error instanceof Error ? (error.cause as { code?: unknown })?.code : null;
+          const reason =
+            (error instanceof Error ? error.message : 'unknown error') +
+            (typeof code === 'string' ? ` (${code})` : '');
+          throw new ApiError(messages.network(origin, reason), EXIT.failure, 'NETWORK');
         }
 
         const text = await readCapped(res, options.maxBytes ?? MAX_RESPONSE_BYTES);
@@ -135,6 +141,32 @@ export function createHttpClient(options: HttpOptions) {
           json = JSON.parse(text);
         } catch {
           // handled below as a bad response
+        }
+
+        // Envelope-mode errors (raw has its own RFC-shaped handling below).
+        if (!res.ok && !o.raw) {
+          const err = ErrorEnvelope.safeParse(json);
+          if (res.status === 429 || (err.success && err.data.error.code === 'RATE_LIMITED')) {
+            const retry = Number(res.headers.get('retry-after'));
+            throw new ApiError(
+              messages.rateLimited(Number.isFinite(retry) && retry > 0 ? retry : null),
+              EXIT.rateLimited,
+              'RATE_LIMITED',
+            );
+          }
+          if (!err.success) {
+            throw new ApiError(messages.httpFailure(res.status), EXIT.failure, 'HTTP_ERROR');
+          }
+          const { code, message, details } = err.data.error;
+          throw new ApiError(message, exitForApiError(code, res.status), code, details ?? null);
+        }
+
+        // A plain-text answer (the doctor markdown handoff) is the body itself, validated
+        // by the caller's schema; the JSON error handling above still applies to it.
+        if (o.text) {
+          const body = o.schema.safeParse(text);
+          if (!body.success) throw new ApiError(messages.badResponse, EXIT.failure, 'BAD_RESPONSE');
+          return body.data;
         }
 
         if (o.raw) {
@@ -153,23 +185,6 @@ export function createHttpClient(options: HttpOptions) {
           const body = o.schema.safeParse(json);
           if (!body.success) throw new ApiError(messages.badResponse, EXIT.failure, 'BAD_RESPONSE');
           return body.data;
-        }
-
-        if (!res.ok) {
-          const err = ErrorEnvelope.safeParse(json);
-          if (res.status === 429 || (err.success && err.data.error.code === 'RATE_LIMITED')) {
-            const retry = Number(res.headers.get('retry-after'));
-            throw new ApiError(
-              messages.rateLimited(Number.isFinite(retry) && retry > 0 ? retry : null),
-              EXIT.rateLimited,
-              'RATE_LIMITED',
-            );
-          }
-          if (!err.success) {
-            throw new ApiError(messages.httpFailure(res.status), EXIT.failure, 'HTTP_ERROR');
-          }
-          const { code, message, details } = err.data.error;
-          throw new ApiError(message, exitForApiError(code, res.status), code, details ?? null);
         }
 
         // A 204 carries no body (the device self-revoke): success with no payload, validated by

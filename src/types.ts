@@ -29,7 +29,7 @@ export interface Ctx {
   json: boolean;
   yes: boolean;
   /** Values of the options shared by profile commands. */
-  options: { runtime?: string; model?: string };
+  options: { runtime?: string; model?: string; markdown?: boolean };
   /** Command ids the user named with `--allow`. */
   allow: readonly string[];
   /** Positional arguments after the command name. */
