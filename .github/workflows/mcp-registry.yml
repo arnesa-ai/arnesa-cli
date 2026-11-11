@@ -1,0 +1,58 @@
+name: mcp-registry
+
+# Publishes the Arnesa MCP server definition in server.json to the official MCP
+# Registry using GitHub OIDC. Organisation namespaces (io.github.orgname/*) must
+# be published from GitHub Actions; interactive `mcp-publisher login github`
+# only grants the personal namespace and is refused with 403.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write # required for GitHub OIDC authentication with the MCP Registry
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download mcp-publisher v1.8.9 and checksums
+        env:
+          MCP_VERSION: v1.8.9
+          MCP_ASSET: mcp-publisher_linux_amd64.tar.gz
+        run: |
+          mkdir -p "$RUNNER_TEMP/mcp-publisher"
+          cd "$RUNNER_TEMP/mcp-publisher"
+          curl -fsSL -o "$MCP_ASSET" \
+            "https://github.com/modelcontextprotocol/registry/releases/download/$MCP_VERSION/$MCP_ASSET"
+          curl -fsSL -o registry_checksums.txt \
+            "https://github.com/modelcontextprotocol/registry/releases/download/$MCP_VERSION/registry_1.8.9_checksums.txt"
+
+      - name: Verify mcp-publisher archive checksum
+        env:
+          MCP_ASSET: mcp-publisher_linux_amd64.tar.gz
+        run: |
+          cd "$RUNNER_TEMP/mcp-publisher"
+          EXPECTED_SHA256=$(grep "^[^ ]*  $MCP_ASSET$" registry_checksums.txt | cut -d' ' -f1)
+          echo "Expected SHA-256: $EXPECTED_SHA256"
+          echo "$EXPECTED_SHA256  $MCP_ASSET" | sha256sum -c -
+
+      - name: Extract mcp-publisher
+        run: |
+          cd "$RUNNER_TEMP/mcp-publisher"
+          tar -xzf mcp-publisher_linux_amd64.tar.gz mcp-publisher
+          chmod +x mcp-publisher
+          ./mcp-publisher --version
+
+      # OIDC login subcommand from the MCP Registry GitHub Actions docs:
+      # https://modelcontextprotocol.io/registry/github-actions
+      #   run: ./mcp-publisher login github-oidc
+      - name: Log in to MCP Registry with GitHub OIDC
+        run: $RUNNER_TEMP/mcp-publisher/mcp-publisher login github-oidc
+
+      - name: Validate server.json
+        run: $RUNNER_TEMP/mcp-publisher/mcp-publisher validate
+
+      - name: Publish to MCP Registry
+        run: $RUNNER_TEMP/mcp-publisher/mcp-publisher publish
